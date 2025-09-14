@@ -1,10 +1,9 @@
-﻿namespace library_one
+﻿namespace library_one;
+
+public class Class1
 {
-    public class Class1
+    public string Method()
     {
-        public string Method()
-        {
-            return "yo";
-        }
+        return "yo";
     }
 }
