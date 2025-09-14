@@ -1,0 +1,76 @@
+# .github/workflows/on-tag-folder-diff.yml
+name: On tag - run task if folder changed
+
+on:
+  push:
+    tags:
+      - '*'            # trigger on any tag push (e.g. v1.2.3)
+
+jobs:
+  check-and-run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out full history (incl. tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # fetch all history + tags per docs
+          fetch-tags: true
+
+      - name: Determine current & previous tag
+        id: tags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Current tag name from the event context (e.g. "v1.2.3")
+          echo "current=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+          # Ensure tags are up-to-date locally
+          git fetch --force --tags
+
+          # Try to get the tag immediately *before* the current one by creation date
+          PREV_TAG="$(git tag --sort=-creatordate | awk -v cur="$GITHUB_REF_NAME" '$0==cur{getline; print; exit}')"
+
+          # Fallback: second most-recent tag across the repo
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG="$(git describe --abbrev=0 --tags "$(git rev-list --tags --skip=1 --max-count=1)" || true)"
+          fi
+
+          echo "previous=${PREV_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Previous tag: ${PREV_TAG:-<none>}"
+
+      - name: Check if folder changed since previous tag
+        id: diff
+        shell: bash
+        env:
+          TARGET_DIR: path/to/your/folder   # <<< change this
+        run: |
+          set -euo pipefail
+          PREV="${{ steps.tags.outputs.previous }}"
+          CUR="${{ steps.tags.outputs.current }}"
+
+          if [ -z "$PREV" ]; then
+            echo "No previous tag found; treating as changed on first tag."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Exit code 0 = no changes; 1 = changes present
+          if git diff --quiet "${PREV}..${CUR}" -- "$TARGET_DIR"; then
+            echo "No changes in $TARGET_DIR between $PREV and $CUR."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Detected changes in $TARGET_DIR between $PREV and $CUR."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Do the thing (only if folder changed)
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          echo "Running task because ${{ env.TARGET_DIR }} changed."
+          # TODO: your commands go here (build, publish, deploy, etc.)
+
+      - name: Skip message
+        if: steps.diff.outputs.changed == 'false'
+        run: echo "Folder unchanged; skipping task."
