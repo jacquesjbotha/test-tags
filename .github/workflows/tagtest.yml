@@ -1,38 +1,63 @@
-# .github/workflows/on-tag-folder-diff.yml
-name: On tag - run task if folder changed
+# .github/workflows/on-tag-main-folder-diff.yml
+name: On tag (main only) → run task if folder changed
 
 on:
   push:
     tags:
-      - '*'            # trigger on any tag push (e.g. v1.2.3)
+      - '*'   # any tag; we'll guard to main in the job
 
 jobs:
-  check-and-run:
+  guard-and-run:
     runs-on: ubuntu-latest
+
+    env:
+      TARGET_DIR: path/to/your/folder   # <<< change this
 
     steps:
       - name: Check out full history (incl. tags)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0       # fetch all history + tags per docs
+          fetch-depth: 0
           fetch-tags: true
+
+      - name: Ensure origin/main is available
+        run: |
+          git fetch origin +refs/heads/main:refs/remotes/origin/main --prune
+
+      - name: Check tag is on main
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_SHA="$(git rev-list -n 1 "$GITHUB_REF")"
+          if git merge-base --is-ancestor "$TAG_SHA" origin/main; then
+            echo "on_main=true" >> "$GITHUB_OUTPUT"
+            echo "Tag commit is contained in main ✔"
+          else
+            echo "on_main=false" >> "$GITHUB_OUTPUT"
+            echo "Tag commit is NOT contained in main ✖"
+          fi
+
+      - name: Stop early if tag is not on main
+        if: steps.guard.outputs.on_main != 'true'
+        run: |
+          echo "This tag is not on main; exiting."
+          exit 0
 
       - name: Determine current & previous tag
         id: tags
         shell: bash
         run: |
           set -euo pipefail
-
-          # Current tag name from the event context (e.g. "v1.2.3")
           echo "current=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
-          # Ensure tags are up-to-date locally
+          # Make sure tags are present locally
           git fetch --force --tags
 
-          # Try to get the tag immediately *before* the current one by creation date
+          # Previous tag by creation date (immediately before the current tag)
           PREV_TAG="$(git tag --sort=-creatordate | awk -v cur="$GITHUB_REF_NAME" '$0==cur{getline; print; exit}')"
 
-          # Fallback: second most-recent tag across the repo
+          # Fallback: second-most-recent tag if the above didn't find one
           if [ -z "$PREV_TAG" ]; then
             PREV_TAG="$(git describe --abbrev=0 --tags "$(git rev-list --tags --skip=1 --max-count=1)" || true)"
           fi
@@ -43,12 +68,11 @@ jobs:
       - name: Check if folder changed since previous tag
         id: diff
         shell: bash
-        env:
-          TARGET_DIR: path/to/your/folder   # <<< change this
         run: |
           set -euo pipefail
           PREV="${{ steps.tags.outputs.previous }}"
           CUR="${{ steps.tags.outputs.current }}"
+          DIR="${TARGET_DIR}"
 
           if [ -z "$PREV" ]; then
             echo "No previous tag found; treating as changed on first tag."
@@ -56,21 +80,20 @@ jobs:
             exit 0
           fi
 
-          # Exit code 0 = no changes; 1 = changes present
-          if git diff --quiet "${PREV}..${CUR}" -- "$TARGET_DIR"; then
-            echo "No changes in $TARGET_DIR between $PREV and $CUR."
+          if git diff --quiet "${PREV}..${CUR}" -- "$DIR"; then
+            echo "No changes in $DIR between $PREV and $CUR."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
-            echo "Detected changes in $TARGET_DIR between $PREV and $CUR."
+            echo "Detected changes in $DIR between $PREV and $CUR."
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Do the thing (only if folder changed)
         if: steps.diff.outputs.changed == 'true'
         run: |
-          echo "Running task because ${{ env.TARGET_DIR }} changed."
+          echo "Running task because $TARGET_DIR changed."
           # TODO: your commands go here (build, publish, deploy, etc.)
 
-      - name: Skip message
-        if: steps.diff.outputs.changed == 'false'
-        run: echo "Folder unchanged; skipping task."
+      - name: Skip (folder unchanged)
+        if: steps.diff.outputs.changed != 'true'
+        run: echo "Folder unchanged; skipping."
