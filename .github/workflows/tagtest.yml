@@ -1,5 +1,5 @@
 # .github/workflows/on-tag-folder-diff.yml
-name: On tag: run task if folder changed
+name: On tag- run task if folder changed
 
 on:
   push:
