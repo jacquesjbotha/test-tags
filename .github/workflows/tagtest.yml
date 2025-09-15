@@ -1,21 +1,80 @@
-# .github/workflows/on-tag-folder-diff.yml
-name: On tag - run task if folder changed
+name: Test Shared Code
 
 on:
   push:
     tags:
       - '*'            # trigger on any tag push (e.g. v1.2.3)
 
+# Token permissions for OIDC
+#permissions:
+#   id-token: write
+#   contents: write
+#   actions: read
+#   security-events: write
+
+env:
+  GH_RUNNER: "dtfsgitrunner"
+  TEMPLATE_REPO_REF: "main"
+  DOTNET_INSTALL_DIR: "~/.dotnet"
+  SOLUTION_DIRECTORY: sample/src
+  CONFIGURATION: Release
+  DOTNET_CORE_VERSION: 9.0.x
+
+# jobs:
+
+# # .github/workflows/publish-nuget-to-artifactory.yml
+# name: Publish NuGet to Artifactory (tags on main)
+
+# on:
+#   push:
+#     tags:
+#       - '*'   # we’ll guard to "main" in-job
+
 jobs:
-  check-and-run:
+  build-pack-publish:
+    # runs-on: [self-hosted, dtfsgitrunner]
     runs-on: ubuntu-latest
+    env:
+      # (1) Artifactory V3 NuGet feed URL (local/virtual repo)
+      NUGET_SOURCE_URL: https://YOUR-ARTIFACTORY/artifactory/api/nuget/v3/YOUR-REPO/index.json
+      # (2) Optional path where packages are output
+      PACK_OUTPUT: nuget-artifacts
+      SOLUTION_FILE: shared-code/src/DTFS.Integration.Shared.sln
 
     steps:
-      - name: Check out full history (incl. tags)
+      - name: Check out (full history + tags)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0       # fetch all history + tags per docs
+          fetch-depth: 0
           fetch-tags: true
+
+      - name: Ensure origin/main is available
+        run: git fetch origin +refs/heads/main:refs/remotes/origin/main --prune
+
+      - name: Proceed only if tag commit is on main
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_SHA="$(git rev-list -n 1 "$GITHUB_REF")"
+          if git merge-base --is-ancestor "$TAG_SHA" origin/main; then
+            echo "on_main=true" >> "$GITHUB_OUTPUT"
+            echo "Tag is on main ✔"
+          else
+            echo "on_main=false" >> "$GITHUB_OUTPUT"
+            echo "Tag is NOT on main ✖"
+          fi
+
+    #   - name: Stop if not on main
+    #     if: steps.guard.outputs.on_main != 'true'
+    #     run: |
+    #       echo "Exiting (tag is not on main)."
+    #       exit 0
+
+      - name: Stop if not on main
+        if: steps.guard.outputs.on_main != 'true'
+        run: |
+          echo "Exiting (tag is not on main). Not actually for now while testing"
 
       - name: Determine current & previous tag
         id: tags
@@ -40,37 +99,204 @@ jobs:
           echo "previous=${PREV_TAG}" >> "$GITHUB_OUTPUT"
           echo "Previous tag: ${PREV_TAG:-<none>}"
 
-      - name: Check if folder changed since previous tag
-        id: diff
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      # setup-dotnet prepares the CLI for restore/build/pack/push. :contentReference[oaicite:1]{index=1}
+
+
+        #TAG="${GITHUB_REF_NAME}"
+      - name: Derive versions from tag
+        id: ver
         shell: bash
-        env:
-          TARGET_DIR: path/to/your/folder   # <<< change this
         run: |
           set -euo pipefail
-          PREV="${{ steps.tags.outputs.previous }}"
-          CUR="${{ steps.tags.outputs.current }}"
+          # Short tag name, e.g. v1.2.3-beta.4
+          TAG="v0.0.1"
+          # Strip optional leading 'v'
+          VERSION="${TAG#v}"
 
-          if [ -z "$PREV" ]; then
-            echo "No previous tag found; treating as changed on first tag."
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          # NUMERIC (strip any -prerelease) e.g. 1.2.3
+          NUMERIC="${VERSION%%-*}"
 
-          # Exit code 0 = no changes; 1 = changes present
-          if git diff --quiet "${PREV}..${CUR}" -- "$TARGET_DIR"; then
-            echo "No changes in $TARGET_DIR between $PREV and $CUR."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "Detected changes in $TARGET_DIR between $PREV and $CUR."
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
+          # AssemblyVersion (major.minor.0.0) — stable to reduce binding churn
+          MAJOR="${NUMERIC%%.*}"
+          REST="${NUMERIC#*.}"
+          MINOR="${REST%%.*}"
+          ASSEMBLY_VERSION="${MAJOR}.${MINOR}.0.0"
 
-      - name: Do the thing (only if folder changed)
-        if: steps.diff.outputs.changed == 'true'
+          # FileVersion must be numeric only (no suffix). Use full numeric SemVer (1.2.3)
+          FILE_VERSION="${NUMERIC}"
+
+          # InformationalVersion can include the full SemVer (incl. suffix)
+          INFO_VERSION="${VERSION}"
+
+          echo "package_version=${VERSION}"           >> "$GITHUB_OUTPUT"
+          echo "assembly_version=${ASSEMBLY_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "file_version=${FILE_VERSION}"         >> "$GITHUB_OUTPUT"
+          echo "info_version=${INFO_VERSION}"         >> "$GITHUB_OUTPUT"
+
+          echo "Computed:"
+          echo "  Package/Version:     $VERSION"
+          echo "  AssemblyVersion:     $ASSEMBLY_VERSION"
+          echo "  FileVersion:         $FILE_VERSION"
+          echo "  InformationalVersion:$INFO_VERSION"
+      # GITHUB_REF_NAME exposes the short tag like "v1.2.3"; .NET lets you set Version/AssemblyVersion/FileVersion/InformationalVersion via MSBuild properties. :contentReference[oaicite:2]{index=2}
+
+      - name: Restore
+        run: dotnet restore ${{ env.SOLUTION_FILE }}
+
+      - name: Build (stamp versions)
         run: |
-          echo "Running task because ${{ env.TARGET_DIR }} changed."
-          # TODO: your commands go here (build, publish, deploy, etc.)
+          dotnet build ${{ env.SOLUTION_FILE }} --configuration Release \
+            -p:ContinuousIntegrationBuild=true \
+            -p:Version=${{ steps.ver.outputs.package_version }} \
+            -p:PackageVersion=${{ steps.ver.outputs.package_version }} \
+            -p:AssemblyVersion=${{ steps.ver.outputs.assembly_version }} \
+            -p:FileVersion=${{ steps.ver.outputs.file_version }} \
+            -p:InformationalVersion="${{ steps.ver.outputs.info_version }}"
+      # Version/PackageVersion flow into packing; assembly/file versions become assembly attributes in SDK-style projects. :contentReference[oaicite:3]{index=3}
 
-      - name: Skip message
-        if: steps.diff.outputs.changed == 'false'
-        run: echo "Folder unchanged; skipping task."
+      - name: Pack
+        run: |
+          dotnet pack ${{ env.SOLUTION_FILE }} --configuration Release --no-build \
+            -p:PackageVersion=${{ steps.ver.outputs.package_version }} \
+            -o "$PACK_OUTPUT"
+
+      - name: Publish NuGet Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: "Nuget Packages"
+          path: ${{ env.PACK_OUTPUT }}
+          include-hidden-files: true
+
+      - name: Register Nuget Source
+        run: |
+          dotnet nuget remove source Artifactory || true
+          dotnet nuget add source "https://art.t3.daimlertruck.com/artifactory/api/nuget/v3/NZS-NUGET-LOCAL/index.json" \
+          --name Artifactory \
+          --username "${{ secrets.ARTIFACTORY_API_USERNAME }}" \
+          --password  "${{ secrets.ARTIFACTORY_API_PASSWORD }}" \
+          --store-password-in-clear-text
+    
+     #library-one
+      - name: Publish DTFS.Integration.Shared NuGet to Artifactory
+        uses: ./.github/actions/publish-nuget-to-artifactory
+        with:
+          package-name: "library-one"
+          folder-path: "tag-solution/library-one"
+          api_key: "${{ secrets.ARTIFACTORY_API_USERNAME }}:${{ secrets.ARTIFACTORY_API_PASSWORD }}"
+          previous_tag: "${{ steps.tags.outputs.previous }}"
+          current_tag: "${{ steps.tags.outputs.current }}"
+          
+    #library-two
+      - name: Publish DTFS.Integration.ExternalService.AzureKeyVault NuGet to Artifactory
+        uses: ./.github/actions/publish-nuget-to-artifactory
+        with:
+          package-name: "library-two"
+          folder-path: "tag-solution/library-two"
+          api_key: "${{ secrets.ARTIFACTORY_API_USERNAME }}:${{ secrets.ARTIFACTORY_API_PASSWORD }}"
+          previous_tag: "${{ steps.tags.outputs.previous }}"
+          current_tag: "${{ steps.tags.outputs.current }}"
+
+
+    # #DTFS.Integration.ExternalService.AzureServiceBus
+    #   - name: Publish DTFS.Integration.ExternalService.AzureServiceBus NuGet to Artifactory
+    #     uses: ./.github/actions/publish-nuget-to-artifactory
+    #     with:
+    #       package-name: "DTFS.Integration.ExternalService.AzureServiceBus"
+    #       folder-path: "shared-code/src/DTFS.Integration.ExternalService.AzureServiceBus"
+    #       api_key: "${{ secrets.ARTIFACTORY_API_USERNAME }}:${{ secrets.ARTIFACTORY_API_PASSWORD }}"
+    #       previous_tag: "${{ steps.tags.outputs.previous }}"
+    #       current_tag: "${{ steps.tags.outputs.current }}"
+
+    # #DTFS.Integration.ExternalService.AzureSql
+    #   - name: Publish DTFS.Integration.ExternalService.AzureSql NuGet to Artifactory
+    #     uses: ./.github/actions/publish-nuget-to-artifactory
+    #     with:
+    #       package-name: "DTFS.Integration.ExternalService.AzureSql"
+    #       folder-path: "shared-code/src/DTFS.Integration.ExternalService.AzureSql"
+    #       api_key: "${{ secrets.ARTIFACTORY_API_USERNAME }}:${{ secrets.ARTIFACTORY_API_PASSWORD }}"
+    #       previous_tag: "${{ steps.tags.outputs.previous }}"
+    #       current_tag: "${{ steps.tags.outputs.current }}"
+
+    # #DTFS.Integration.ExternalService.AzureStorage
+    #   - name: Publish DTFS.Integration.ExternalService.AzureStorage NuGet to Artifactory
+    #     uses: ./.github/actions/publish-nuget-to-artifactory
+    #     with:
+    #       package-name: "DTFS.Integration.ExternalService.AzureStorage"
+    #       folder-path: "shared-code/src/DTFS.Integration.ExternalService.AzureStorage"
+    #       api_key: "${{ secrets.ARTIFACTORY_API_USERNAME }}:${{ secrets.ARTIFACTORY_API_PASSWORD }}"
+    #       previous_tag: "${{ steps.tags.outputs.previous }}"
+    #       current_tag: "${{ steps.tags.outputs.current }}"
+
+          
+      # You can pass MSBuild properties to 'dotnet pack'; output to a folder. :contentReference[oaicite:4]{index=4}
+
+    #   - name: Publish .nupkg to Artifactory
+    #     env:
+    #       ARTIFACTORY_API_KEY: ${{ secrets.ARTIFACTORY_API_KEY }}
+    #     run: |
+    #       dotnet nuget push "$PACK_OUTPUT/**/*.nupkg" \
+    #         --source "${NUGET_SOURCE_URL}" \
+    #         --api-key "${ARTIFACTORY_API_KEY}" \
+    #         --skip-duplicate
+      # 'dotnet nuget push' accepts a source URL and API key; --skip-duplicate is handy for idempotent runs. :contentReference[oaicite:5]{index=5}
+
+      # (Optional) If you build symbol packages (.snupkg), publish them too:
+      # - name: Publish .snupkg to Artifactory Symbols repo
+      #   env:
+      #     ARTIFACTORY_API_KEY: ${{ secrets.ARTIFACTORY_API_KEY }}
+      #   run: |
+      #     dotnet nuget push "$PACK_OUTPUT/**/*.snupkg" \
+      #       --source "https://YOUR-ARTIFACTORY/artifactory/api/nuget/v3/YOUR-SYMBOLS-REPO/index.json" \
+      #       --api-key "${ARTIFACTORY_API_KEY}" \
+      #       --skip-duplicate
+      # Artifactory supports NuGet V3 and symbol packages if enabled. :contentReference[oaicite:6]{index=6}
+
+
+#   prepare_envs:
+#     runs-on: [self-hosted, dtfsgitrunner]
+#     name: ⭐ Prepare Variables
+#     steps:
+#       - run: echo "prepare variables"   
+#     outputs:
+#       gh_runner: ${{ env.GH_RUNNER }}
+#       solution_directory: ${{ env.SOLUTION_DIRECTORY }}
+#       configuration: ${{ env.CONFIGURATION }}
+#       dotnet_core_version: ${{ env.DOTNET_CORE_VERSION }}
+#       template_repo_ref: ${{ env.TEMPLATE_REPO_REF }}
+
+  ########### TEST SOLUTION #############
+
+#   test_shared_code:
+#     name: 🧪 Test
+#     needs: [prepare_envs]
+#     # if: ${{ inputs.workflow_trigger == 'pull_request' }}
+#     uses: ./.github/workflows/template-function-test.yml
+#     with:
+#       gh_runner: ${{ needs.prepare_envs.outputs.gh_runner }}
+#       solution_directory: ${{ needs.prepare_envs.outputs.solution_directory }}
+#       run_integration_tests: false
+#     secrets: inherit
+
+#   actions-post-deployment-check:
+#     runs-on: [self-hosted, "${{ needs.prepare_envs.outputs.gh_runner }}"]
+#     name: Post Deployment Check
+#     needs: [prepare_envs, test_shared_code]
+#     if: ${{ always() }}   # ensures this job runs even if upstream jobs failed
+#     steps:
+#       - name: Check deployment results
+#         shell: bash
+#         run: |
+#           hasFailure=${{ contains(needs.*.result, 'failure') }}
+#           hasCancelled=${{ contains(needs.*.result, 'cancelled') }}
+          
+#           if [[ "$hasFailure" == "true" || "$hasCancelled" == "true" ]]; then
+#             echo ""
+#             echo "💥 DEPLOYMENT CHECK FAILED"
+#             exit 1
+#           else
+#             echo "🎉 All deployment jobs completed successfully or were skipped"
+#           fi

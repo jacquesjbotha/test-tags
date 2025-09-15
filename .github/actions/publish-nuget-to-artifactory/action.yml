@@ -1,0 +1,67 @@
+name: "Publish NuGet updated to Artifactory"
+description: "If the code has been updated, pack the project and push the NuGet package to Artifactory."
+
+inputs:
+  package-name:
+    description: "NuGet package name (Can exclude version)"
+    required: true
+  folder-path:
+    description: "Path to the NuGet project to check for changes"
+    required: true
+  api_key:
+    description: "API key for pushing packages"
+    required: true
+  previous_tag:
+    description: "Previous tag for versioning"
+    required: true
+  current_tag:
+    description: "Current tag for versioning"
+    required: true
+
+
+outputs:
+  pushed:
+    description: "Whether pushing to Artifactory succeeded"
+    value: ${{ steps.push-step.outputs.pushed }}
+
+runs:
+  using: "composite"
+  steps:
+
+    - name: Check if folder changed since previous tag
+      id: diff
+      shell: bash
+      env:
+        TARGET_DIR: path/to/your/folder   # <<< change this
+      run: |
+        set -euo pipefail
+          PREV="${{ steps.tags.outputs.previous }}"
+          CUR="${{ steps.tags.outputs.current }}"
+
+          if [ -z "$PREV" ]; then
+            echo "No previous tag found; treating as changed on first tag."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Exit code 0 = no changes; 1 = changes present
+          if git diff --quiet "${PREV}..${CUR}" -- "$TARGET_DIR"; then
+            echo "No changes in $TARGET_DIR between $PREV and $CUR."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Detected changes in $TARGET_DIR between $PREV and $CUR."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+    - name: Push to Artifactory
+      shell: bash
+      id: push-step
+      if: steps.diff.outputs.changed == 'true'
+      run: |
+        echo "Pushing ${{ inputs.package-name }} to Artifactory..."
+        echo "pushed=true" >> $GITHUB_OUTPUT
+
+    - name: Skip message
+      shell: bash
+      if: steps.diff.outputs.changed == 'false'
+      run: echo "Folder unchanged; skipping ${{ inputs.package-name }}."

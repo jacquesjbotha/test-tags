@@ -4,6 +4,7 @@ public class Class2
 {
     public string OtherMethod()
     {
-        return "Another message";
+        return "Another message I updated";
     }
+
 }
