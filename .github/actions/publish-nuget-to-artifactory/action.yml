@@ -32,11 +32,11 @@ runs:
       id: diff
       shell: bash
       env:
-        TARGET_DIR: path/to/your/folder   # <<< change this
+        TARGET_DIR: ${{ inputs.folder-path }}
       run: |
         set -euo pipefail
-          PREV="${{ steps.tags.outputs.previous }}"
-          CUR="${{ steps.tags.outputs.current }}"
+          PREV="${{ inputs.previous_tag }}"
+          CUR="${{ inputs.current_tag }}"
 
           if [ -z "$PREV" ]; then
             echo "No previous tag found; treating as changed on first tag."
