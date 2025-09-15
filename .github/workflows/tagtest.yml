@@ -56,7 +56,7 @@ jobs:
       NUGET_SOURCE_URL: https://YOUR-ARTIFACTORY/artifactory/api/nuget/v3/YOUR-REPO/index.json
       # (2) Optional path where packages are output
       PACK_OUTPUT: nuget-artifacts
-      SOLUTION_FILE: shared-code/src/DTFS.Integration.Shared.sln
+      SOLUTION_FILE: tag-solution/tag-solution.sln
 
     steps:
       - name: Check out (full history + tags)
