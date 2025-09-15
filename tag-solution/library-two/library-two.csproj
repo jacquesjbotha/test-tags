@@ -7,8 +7,4 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="DTFS.Integration.Shared.Common" Version="1.0.0" />
-  </ItemGroup>
-
 </Project>
