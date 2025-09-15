@@ -179,12 +179,12 @@ jobs:
             -p:PackageVersion=${{ steps.ver.outputs.package_version }} \
             -o "$PACK_OUTPUT"
 
-      - name: Publish NuGet Artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: "Nuget Packages"
-          path: ${{ env.PACK_OUTPUT }}
-          include-hidden-files: true
+      # - name: Publish NuGet Artifacts
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: "Nuget Packages"
+      #     path: ${{ env.PACK_OUTPUT }}
+      #     include-hidden-files: true
 
      #library-one
       - name: Publish DTFS.Integration.Shared NuGet to Artifactory
