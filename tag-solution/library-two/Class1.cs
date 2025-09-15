@@ -4,7 +4,7 @@ public class Class2
 {
     public string OtherMethod()
     {
-        return "Another message I updated";
+        var localVar = "Another message I updated";
+        return localVar;
     }
-
 }
