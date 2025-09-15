@@ -37,14 +37,6 @@ env:
 #   actions: read
 #   security-events: write
 
-env:
-  GH_RUNNER: "dtfsgitrunner"
-  TEMPLATE_REPO_REF: "main"
-  DOTNET_INSTALL_DIR: "~/.dotnet"
-  SOLUTION_DIRECTORY: sample/src
-  CONFIGURATION: Release
-  DOTNET_CORE_VERSION: 9.0.x
-
 # jobs:
 
 # # .github/workflows/publish-nuget-to-artifactory.yml
@@ -66,14 +58,10 @@ jobs:
       PACK_OUTPUT: nuget-artifacts
       SOLUTION_FILE: shared-code/src/DTFS.Integration.Shared.sln
 
-    env:
-      TARGET_DIR: path/to/your/folder   # <<< change this
-
     steps:
       - name: Check out (full history + tags)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           fetch-depth: 0
           fetch-tags: true
 
@@ -198,11 +186,22 @@ jobs:
           path: ${{ env.PACK_OUTPUT }}
           include-hidden-files: true
 
-      - name: Register Nuget Source
-        run: |
-          echo "Running task because ${{ env.TARGET_DIR }} changed."
-          # TODO: your commands go here (build, publish, deploy, etc.)
-
-      - name: Skip message
-        if: steps.diff.outputs.changed == 'false'
-        run: echo "Folder unchanged; skipping task."
+     #library-one
+      - name: Publish DTFS.Integration.Shared NuGet to Artifactory
+        uses: ./.github/actions/publish-nuget-to-artifactory
+        with:
+          package-name: "library-one"
+          folder-path: "tag-solution/library-one"
+          api_key: "${{ secrets.ARTIFACTORY_API_USERNAME }}:${{ secrets.ARTIFACTORY_API_PASSWORD }}"
+          previous_tag: "${{ steps.tags.outputs.previous }}"
+          current_tag: "${{ steps.tags.outputs.current }}"
+          
+    #library-two
+      - name: Publish DTFS.Integration.ExternalService.AzureKeyVault NuGet to Artifactory
+        uses: ./.github/actions/publish-nuget-to-artifactory
+        with:
+          package-name: "library-two"
+          folder-path: "tag-solution/library-two"
+          api_key: "${{ secrets.ARTIFACTORY_API_USERNAME }}:${{ secrets.ARTIFACTORY_API_PASSWORD }}"
+          previous_tag: "${{ steps.tags.outputs.previous }}"
+          current_tag: "${{ steps.tags.outputs.current }}"
