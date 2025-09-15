@@ -94,16 +94,16 @@ jobs:
             echo "Tag is NOT on main ✖"
           fi
 
-    #   - name: Stop if not on main
-    #     if: steps.guard.outputs.on_main != 'true'
-    #     run: |
-    #       echo "Exiting (tag is not on main)."
-    #       exit 0
-
       - name: Stop if not on main
         if: steps.guard.outputs.on_main != 'true'
         run: |
-          echo "Exiting (tag is not on main). Not actually for now while testing"
+          echo "Exiting (tag is not on main)."
+          exit 0
+
+      # - name: Stop if not on main
+      #   if: steps.guard.outputs.on_main != 'true'
+      #   run: |
+      #     echo "Exiting (tag is not on main). Not actually for now while testing"
 
       - name: Determine current & previous tag
         id: tags
@@ -140,7 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           # Short tag name, e.g. v1.2.3-beta.4
-          TAG="v0.0.1"
+          TAG="${GITHUB_REF_NAME}"
           # Strip optional leading 'v'
           VERSION="${TAG#v}"
 
