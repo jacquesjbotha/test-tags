@@ -3,7 +3,32 @@ name: Test Shared Code
 on:
   push:
     tags:
-      - '*'            # trigger on any tag push (e.g. v1.2.3)
+      - '*'   # any tag; we'll guard to main in the job
+
+# Token permissions for OIDC
+#permissions:
+#   id-token: write
+#   contents: write
+#   actions: read
+#   security-events: write
+
+env:
+  GH_RUNNER: "dtfsgitrunner"
+  TEMPLATE_REPO_REF: "main"
+  DOTNET_INSTALL_DIR: "~/.dotnet"
+  SOLUTION_DIRECTORY: sample/src
+  CONFIGURATION: Release
+  DOTNET_CORE_VERSION: 9.0.x
+
+# jobs:
+
+# # .github/workflows/publish-nuget-to-artifactory.yml
+# name: Publish NuGet to Artifactory (tags on main)
+
+# on:
+#   push:
+#     tags:
+#       - '*'   # we’ll guard to "main" in-job
 
 # Token permissions for OIDC
 #permissions:
@@ -41,10 +66,14 @@ jobs:
       PACK_OUTPUT: nuget-artifacts
       SOLUTION_FILE: shared-code/src/DTFS.Integration.Shared.sln
 
+    env:
+      TARGET_DIR: path/to/your/folder   # <<< change this
+
     steps:
       - name: Check out (full history + tags)
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           fetch-depth: 0
           fetch-tags: true
 
@@ -81,17 +110,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          # Current tag name from the event context (e.g. "v1.2.3")
           echo "current=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
-          # Ensure tags are up-to-date locally
+          # Make sure tags are present locally
           git fetch --force --tags
 
-          # Try to get the tag immediately *before* the current one by creation date
+          # Previous tag by creation date (immediately before the current tag)
           PREV_TAG="$(git tag --sort=-creatordate | awk -v cur="$GITHUB_REF_NAME" '$0==cur{getline; print; exit}')"
 
-          # Fallback: second most-recent tag across the repo
+          # Fallback: second-most-recent tag if the above didn't find one
           if [ -z "$PREV_TAG" ]; then
             PREV_TAG="$(git describe --abbrev=0 --tags "$(git rev-list --tags --skip=1 --max-count=1)" || true)"
           fi
@@ -173,130 +200,9 @@ jobs:
 
       - name: Register Nuget Source
         run: |
-          dotnet nuget remove source Artifactory || true
-          dotnet nuget add source "https://art.t3.daimlertruck.com/artifactory/api/nuget/v3/NZS-NUGET-LOCAL/index.json" \
-          --name Artifactory \
-          --username "${{ secrets.ARTIFACTORY_API_USERNAME }}" \
-          --password  "${{ secrets.ARTIFACTORY_API_PASSWORD }}" \
-          --store-password-in-clear-text
-    
-     #library-one
-      - name: Publish DTFS.Integration.Shared NuGet to Artifactory
-        uses: ./.github/actions/publish-nuget-to-artifactory
-        with:
-          package-name: "library-one"
-          folder-path: "tag-solution/library-one"
-          api_key: "${{ secrets.ARTIFACTORY_API_USERNAME }}:${{ secrets.ARTIFACTORY_API_PASSWORD }}"
-          previous_tag: "${{ steps.tags.outputs.previous }}"
-          current_tag: "${{ steps.tags.outputs.current }}"
-          
-    #library-two
-      - name: Publish DTFS.Integration.ExternalService.AzureKeyVault NuGet to Artifactory
-        uses: ./.github/actions/publish-nuget-to-artifactory
-        with:
-          package-name: "library-two"
-          folder-path: "tag-solution/library-two"
-          api_key: "${{ secrets.ARTIFACTORY_API_USERNAME }}:${{ secrets.ARTIFACTORY_API_PASSWORD }}"
-          previous_tag: "${{ steps.tags.outputs.previous }}"
-          current_tag: "${{ steps.tags.outputs.current }}"
+          echo "Running task because ${{ env.TARGET_DIR }} changed."
+          # TODO: your commands go here (build, publish, deploy, etc.)
 
-
-    # #DTFS.Integration.ExternalService.AzureServiceBus
-    #   - name: Publish DTFS.Integration.ExternalService.AzureServiceBus NuGet to Artifactory
-    #     uses: ./.github/actions/publish-nuget-to-artifactory
-    #     with:
-    #       package-name: "DTFS.Integration.ExternalService.AzureServiceBus"
-    #       folder-path: "shared-code/src/DTFS.Integration.ExternalService.AzureServiceBus"
-    #       api_key: "${{ secrets.ARTIFACTORY_API_USERNAME }}:${{ secrets.ARTIFACTORY_API_PASSWORD }}"
-    #       previous_tag: "${{ steps.tags.outputs.previous }}"
-    #       current_tag: "${{ steps.tags.outputs.current }}"
-
-    # #DTFS.Integration.ExternalService.AzureSql
-    #   - name: Publish DTFS.Integration.ExternalService.AzureSql NuGet to Artifactory
-    #     uses: ./.github/actions/publish-nuget-to-artifactory
-    #     with:
-    #       package-name: "DTFS.Integration.ExternalService.AzureSql"
-    #       folder-path: "shared-code/src/DTFS.Integration.ExternalService.AzureSql"
-    #       api_key: "${{ secrets.ARTIFACTORY_API_USERNAME }}:${{ secrets.ARTIFACTORY_API_PASSWORD }}"
-    #       previous_tag: "${{ steps.tags.outputs.previous }}"
-    #       current_tag: "${{ steps.tags.outputs.current }}"
-
-    # #DTFS.Integration.ExternalService.AzureStorage
-    #   - name: Publish DTFS.Integration.ExternalService.AzureStorage NuGet to Artifactory
-    #     uses: ./.github/actions/publish-nuget-to-artifactory
-    #     with:
-    #       package-name: "DTFS.Integration.ExternalService.AzureStorage"
-    #       folder-path: "shared-code/src/DTFS.Integration.ExternalService.AzureStorage"
-    #       api_key: "${{ secrets.ARTIFACTORY_API_USERNAME }}:${{ secrets.ARTIFACTORY_API_PASSWORD }}"
-    #       previous_tag: "${{ steps.tags.outputs.previous }}"
-    #       current_tag: "${{ steps.tags.outputs.current }}"
-
-          
-      # You can pass MSBuild properties to 'dotnet pack'; output to a folder. :contentReference[oaicite:4]{index=4}
-
-    #   - name: Publish .nupkg to Artifactory
-    #     env:
-    #       ARTIFACTORY_API_KEY: ${{ secrets.ARTIFACTORY_API_KEY }}
-    #     run: |
-    #       dotnet nuget push "$PACK_OUTPUT/**/*.nupkg" \
-    #         --source "${NUGET_SOURCE_URL}" \
-    #         --api-key "${ARTIFACTORY_API_KEY}" \
-    #         --skip-duplicate
-      # 'dotnet nuget push' accepts a source URL and API key; --skip-duplicate is handy for idempotent runs. :contentReference[oaicite:5]{index=5}
-
-      # (Optional) If you build symbol packages (.snupkg), publish them too:
-      # - name: Publish .snupkg to Artifactory Symbols repo
-      #   env:
-      #     ARTIFACTORY_API_KEY: ${{ secrets.ARTIFACTORY_API_KEY }}
-      #   run: |
-      #     dotnet nuget push "$PACK_OUTPUT/**/*.snupkg" \
-      #       --source "https://YOUR-ARTIFACTORY/artifactory/api/nuget/v3/YOUR-SYMBOLS-REPO/index.json" \
-      #       --api-key "${ARTIFACTORY_API_KEY}" \
-      #       --skip-duplicate
-      # Artifactory supports NuGet V3 and symbol packages if enabled. :contentReference[oaicite:6]{index=6}
-
-
-#   prepare_envs:
-#     runs-on: [self-hosted, dtfsgitrunner]
-#     name: ⭐ Prepare Variables
-#     steps:
-#       - run: echo "prepare variables"   
-#     outputs:
-#       gh_runner: ${{ env.GH_RUNNER }}
-#       solution_directory: ${{ env.SOLUTION_DIRECTORY }}
-#       configuration: ${{ env.CONFIGURATION }}
-#       dotnet_core_version: ${{ env.DOTNET_CORE_VERSION }}
-#       template_repo_ref: ${{ env.TEMPLATE_REPO_REF }}
-
-  ########### TEST SOLUTION #############
-
-#   test_shared_code:
-#     name: 🧪 Test
-#     needs: [prepare_envs]
-#     # if: ${{ inputs.workflow_trigger == 'pull_request' }}
-#     uses: ./.github/workflows/template-function-test.yml
-#     with:
-#       gh_runner: ${{ needs.prepare_envs.outputs.gh_runner }}
-#       solution_directory: ${{ needs.prepare_envs.outputs.solution_directory }}
-#       run_integration_tests: false
-#     secrets: inherit
-
-#   actions-post-deployment-check:
-#     runs-on: [self-hosted, "${{ needs.prepare_envs.outputs.gh_runner }}"]
-#     name: Post Deployment Check
-#     needs: [prepare_envs, test_shared_code]
-#     if: ${{ always() }}   # ensures this job runs even if upstream jobs failed
-#     steps:
-#       - name: Check deployment results
-#         shell: bash
-#         run: |
-#           hasFailure=${{ contains(needs.*.result, 'failure') }}
-#           hasCancelled=${{ contains(needs.*.result, 'cancelled') }}
-          
-#           if [[ "$hasFailure" == "true" || "$hasCancelled" == "true" ]]; then
-#             echo ""
-#             echo "💥 DEPLOYMENT CHECK FAILED"
-#             exit 1
-#           else
-#             echo "🎉 All deployment jobs completed successfully or were skipped"
-#           fi
+      - name: Skip message
+        if: steps.diff.outputs.changed == 'false'
+        run: echo "Folder unchanged; skipping task."
